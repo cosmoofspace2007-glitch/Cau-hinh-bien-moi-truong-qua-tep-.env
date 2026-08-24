@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # câu hình image của mysql chạy cổng 3306
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "${MYSQL_PORT}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  product-api:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    container_name: product-api
+    environment:
+      SPRING_DATASOURCE_MYSQL_URL: jdbc:mysql://mysql:3306/${PRODUCT_DB_NAME}?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_MYSQL_USERNAME: ${PRODUCT_DB_USERNAME}
+      SPRING_DATASOURCE_MYSQL_PASSWORD:  ${PRODUCT_DB_PASSWORD}
+    ports:
+      - "${PRODUCT_SERVER_PORT}:8686"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  order-api:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: order-api
+    environment:
+      SPRING_DATASOURCE_POSTGRES_URL: jdbc:postgresql://postgres:5432/${ORDER_DB_NAME}
+      SPRING_DATASOURCE_POSTGRES_USERNAME: ${ORDER_DB_USERNAME}
+      SPRING_DATASOURCE_POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD}
+    ports:
+      - "${ORDER_SERVER_PORT}:8687"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    environment:
+      PRODUCT_SERVICE_URL: ${PRODUCT_SERVICE_URL}
+      ORDER_SERVICE_URL:  ${ORDER_SERVICE_URL}
+    ports:
+      - "${GATEWAY_SERVER_PORT}:8080"
+    depends_on:
+      - product-api
+      - order-api
+    networks:
+      - microservices-net
+
+networks:
+  microservices-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mysql_data:
+
